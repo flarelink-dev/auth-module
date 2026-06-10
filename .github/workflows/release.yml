@@ -46,16 +46,21 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          SHA256: ${{ steps.hash.outputs.sha256 }}
         run: |
+          cat > release-notes.md <<EOF
+          Bundle \`dist/worker.mjs\` SHA-256: \`$SHA256\`
+
+          **Verify the bundle deployed in your own Cloudflare account:**
+          \`\`\`
+          npx flarelink-verify
+          \`\`\`
+
+          **Or rebuild from this source and diff:**
+          \`\`\`
+          npm ci && npm run build && sha256sum dist/worker.mjs
+          \`\`\`
+          EOF
           gh release create "$GITHUB_REF_NAME" dist/worker.mjs \
             --title "auth-module $GITHUB_REF_NAME" \
-            --notes "Bundle \`dist/worker.mjs\` SHA-256: \`${{ steps.hash.outputs.sha256 }}\`
-
-**Verify the bundle deployed in your own Cloudflare account** matches this:
-\`\`\`
-npx flarelink-verify
-\`\`\`
-**Or rebuild from this source and diff:**
-\`\`\`
-npm ci && npm run build && sha256sum dist/worker.mjs
-\`\`\`"
+            --notes-file release-notes.md
