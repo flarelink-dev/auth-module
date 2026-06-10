@@ -53,7 +53,7 @@ jobs:
 
           **Verify the bundle deployed in your own Cloudflare account:**
           \`\`\`
-          npx flarelink-verify
+          npx @flarelink/verify
           \`\`\`
 
           **Or rebuild from this source and diff:**

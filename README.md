@@ -108,7 +108,7 @@ shasum -a 256 dist/worker.mjs    # must equal the v0.3.0 row in HASHES.md
 **2. Does the bundle running in YOUR Cloudflare account match?** The deployed Worker reports its version at `GET https://<your-auth-worker>/__flarelink`. Pull the live script with your own CF token (Workers Scripts API download endpoint) and hash it — it must equal the same `HASHES.md` row. The [`flarelink-verify`](https://github.com/flarelink-dev/flarelink-verify) CLI does this in one command:
 
 ```bash
-npx flarelink-verify    # reads /__flarelink, downloads the script, compares to the published hash
+npx @flarelink/verify    # reads /__flarelink, downloads the script, compares to the published hash
 ```
 
 Together these prove: the public source → the published hash → the bytes Cloudflare is actually running for your users. Flarelink's dashboard is closed source, but everything it *produces* in your account is verifiable this way.

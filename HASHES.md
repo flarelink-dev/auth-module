@@ -8,7 +8,7 @@ You can verify two things against this table:
 1. **What's deployed in your account matches what Flarelink published.** Pull the
    deployed script with your own CF token and hash it — see [README → Verify the
    deployed bundle](README.md#verify-the-deployed-bundle), or run
-   `npx flarelink-verify` which does it for you.
+   `npx @flarelink/verify` which does it for you.
 2. **What Flarelink published matches this public source.** Clone this repo at the
    matching `v<version>` tag, run `npm ci && npm run build`, and hash the output.
    It reproduces the bundle byte-for-byte.
