@@ -1,0 +1,61 @@
+name: Release auth-module bundle
+
+# On every `v*` tag push: clean-build the Worker bundle from pinned deps,
+# verify its SHA-256 matches the entry in HASHES.md (a mismatch means the
+# toolchain drifted — fail loudly rather than publish a wrong hash), and
+# attach dist/worker.mjs + the hash to a GitHub Release. This is what makes
+# "rebuild byte-for-byte and diff against what's deployed" a one-command claim.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pinned deps
+        run: npm ci
+
+      - name: Build bundle
+        run: npm run build
+
+      - name: Compute + verify hash against HASHES.md
+        id: hash
+        run: |
+          HASH=$(sha256sum dist/worker.mjs | cut -d' ' -f1)
+          echo "sha256=$HASH" >> "$GITHUB_OUTPUT"
+          VERSION="${GITHUB_REF_NAME#v}"
+          EXPECTED=$(grep -E "^\| *$VERSION " HASHES.md | grep -oiE '[0-9a-f]{64}' | head -1 || true)
+          echo "Built:    $HASH"
+          echo "Expected: ${EXPECTED:-<no entry in HASHES.md>}"
+          if [ -n "$EXPECTED" ] && [ "$HASH" != "$EXPECTED" ]; then
+            echo "::error::Built hash does not match HASHES.md for $VERSION — toolchain drift, not publishing."
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/worker.mjs \
+            --title "auth-module $GITHUB_REF_NAME" \
+            --notes "Bundle \`dist/worker.mjs\` SHA-256: \`${{ steps.hash.outputs.sha256 }}\`
+
+**Verify the bundle deployed in your own Cloudflare account** matches this:
+\`\`\`
+npx flarelink-verify
+\`\`\`
+**Or rebuild from this source and diff:**
+\`\`\`
+npm ci && npm run build && sha256sum dist/worker.mjs
+\`\`\`"

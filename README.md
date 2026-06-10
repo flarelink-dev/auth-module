@@ -72,7 +72,7 @@ If you're here to verify the auth code, these are the relevant files:
 
 `version.ts` exports `FLARELINK_AUTH_VERSION` — the single source of truth for the Worker bundle's version. Bumped on every meaningful change to the auth surface (new routes, behavior changes, security fixes). Two places consume it:
 
-- The bundled Worker itself surfaces `/__flarelink` returning `{ version: '0.2.2', ... }` — your dashboard reads this to detect stale deployments and show a "Redeploy → vX" prompt.
+- The bundled Worker itself surfaces `/__flarelink` returning `{ version: '0.3.0', ... }` — your dashboard reads this to detect stale deployments and show a "Redeploy → vX" prompt.
 - The Flarelink dashboard's `auth_module_deployment.flarelinkAuthVersion` column records what version each customer is on, so the version pill knows when an update is available.
 
 Semver convention:
@@ -87,11 +87,33 @@ If you fork or modify this Worker for your own use, bump the version so your dow
 The Worker bundles via [esbuild](https://esbuild.github.io/). The output (`dist/worker.mjs`) is what Flarelink uploads to CF via the Scripts API multipart endpoint.
 
 ```bash
-npm install
+npm ci             # installs the exact pinned deps from package-lock.json
 npm run build      # produces dist/worker.mjs
 ```
 
-The build is reproducible — same input source, same bundled output, byte-for-byte. If you want to verify that the Worker running on your CF account matches a specific version of this source, you can rebuild here and diff the bundle against what's deployed (the dashboard's "Redeploy" button uses the same bundle path).
+`npm ci` (not `npm install`) matters: the build is byte-for-byte reproducible only against the **pinned** dependency versions in `package-lock.json`. Same source + same lockfile + the Node version in [`.github/workflows/release.yml`](.github/workflows/release.yml) → identical bytes.
+
+## Verify the deployed bundle
+
+Two independent checks, neither of which requires trusting Flarelink:
+
+**1. Does the source here reproduce the published bundle?** Clone at the version's tag, rebuild, and compare against [`HASHES.md`](HASHES.md):
+
+```bash
+git checkout v0.3.0
+npm ci && npm run build
+shasum -a 256 dist/worker.mjs    # must equal the v0.3.0 row in HASHES.md
+```
+
+**2. Does the bundle running in YOUR Cloudflare account match?** The deployed Worker reports its version at `GET https://<your-auth-worker>/__flarelink`. Pull the live script with your own CF token (Workers Scripts API download endpoint) and hash it — it must equal the same `HASHES.md` row. The [`flarelink-verify`](https://github.com/flarelink-dev/flarelink-verify) CLI does this in one command:
+
+```bash
+npx flarelink-verify    # reads /__flarelink, downloads the script, compares to the published hash
+```
+
+Together these prove: the public source → the published hash → the bytes Cloudflare is actually running for your users. Flarelink's dashboard is closed source, but everything it *produces* in your account is verifiable this way.
+
+Every released `FLARELINK_AUTH_VERSION` is git-tagged `v<version>`; the [release workflow](.github/workflows/release.yml) rebuilds from pinned deps, asserts the hash matches `HASHES.md`, and attaches `dist/worker.mjs` + its SHA-256 to the GitHub Release.
 
 ## Deploying it yourself (without Flarelink's dashboard)
 
