@@ -155,6 +155,12 @@ type Config = {
   // redeploy. Customers who want it off explicitly write 'false'.
   MAGIC_LINK_ENABLED: boolean;
   MAGIC_LINK_DISABLE_SIGNUP: boolean;
+  // PBKDF2-SHA256 iteration count for password hashing. Read from config so
+  // the dashboard can raise it on deployments running on the Workers *paid*
+  // plan (30s CPU) without breaking free-plan deployments, where native PBKDF2
+  // must stay within the ~10ms CPU ceiling. Absent/invalid → 100k (the highest
+  // value that comfortably fits the free-tier budget). Clamped in loadConfig.
+  PBKDF2_ITERATIONS: number;
   // v0.1.10 per-customer template overrides. Each field is optional —
   // absent → use the bundled default. Subject / html / text override
   // independently so customising one doesn't force the others.
@@ -209,6 +215,14 @@ async function loadConfig(db: D1Database): Promise<Config> {
   // explicitly write 'false' to disable.
   const magicLinkEnabled = (map.get('MAGIC_LINK_ENABLED') ?? 'true') === 'true';
   const magicLinkDisableSignup = map.get('MAGIC_LINK_DISABLE_SIGNUP') === 'true';
+  // Iteration target for new/upgraded password hashes. Clamp to [MIN, MAX] so
+  // a hand-edited config can't drop below the documented baseline or set a
+  // value that would exceed the CPU budget on every sign-in. verifyPassword
+  // reads each hash's own count, so existing hashes verify regardless.
+  const iterRaw = parseInt(map.get('PBKDF2_ITERATIONS') ?? '', 10);
+  const pbkdf2Iterations = Number.isInteger(iterRaw)
+    ? Math.min(Math.max(iterRaw, PBKDF2_ITERATIONS_MIN), PBKDF2_ITERATIONS_MAX)
+    : PBKDF2_ITERATIONS_DEFAULT;
 
   const next: Config = {
     BETTER_AUTH_SECRET: secret,
@@ -232,6 +246,7 @@ async function loadConfig(db: D1Database): Promise<Config> {
     // next reload-config.
     MAGIC_LINK_ENABLED: emailConfigured && magicLinkEnabled,
     MAGIC_LINK_DISABLE_SIGNUP: magicLinkDisableSignup,
+    PBKDF2_ITERATIONS: pbkdf2Iterations,
     TEMPLATE_OVERRIDES: readTemplateOverrides(map),
     SERVICE_KEY_HASH: map.get('SERVICE_KEY_HASH') || undefined,
     R2_ACCOUNT_ID: map.get('R2_ACCOUNT_ID') || undefined,
@@ -331,8 +346,18 @@ function buildSocialProviders(cfg: Config): SocialProvidersConfig {
 }
 
 // --- password hashing (PBKDF2-SHA256 via Web Crypto) -----------------------
+//
+// The iteration count is configurable per-deployment (flarelink_config →
+// PBKDF2_ITERATIONS, read in loadConfig). Default 100k fits the Workers
+// free-tier CPU budget; the dashboard raises it toward OWASP's 600k baseline
+// on paid-plan deployments. Each hash stores the count it was produced with
+// (`pbkdf2$<iterations>$<salt>$<hash>`), so verifyPassword can validate any
+// historical count and createAuth's verify closure transparently re-hashes a
+// below-target hash on the next successful sign-in.
 
-const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_ITERATIONS_DEFAULT = 100_000;
+const PBKDF2_ITERATIONS_MIN = 100_000; // documented floor — never hash below this
+const PBKDF2_ITERATIONS_MAX = 1_000_000; // ceiling so a typo can't DoS sign-in CPU
 
 function toB64(buf: Uint8Array): string {
   let s = '';
@@ -358,10 +383,19 @@ async function pbkdf2(password: string, salt: Uint8Array, iterations: number, by
   return new Uint8Array(bits);
 }
 
-async function hashPassword(password: string): Promise<string> {
+async function hashPassword(password: string, iterations: number): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await pbkdf2(password, salt, PBKDF2_ITERATIONS, 32);
-  return `pbkdf2$${PBKDF2_ITERATIONS}$${toB64(salt)}$${toB64(hash)}`;
+  const hash = await pbkdf2(password, salt, iterations, 32);
+  return `pbkdf2$${iterations}$${toB64(salt)}$${toB64(hash)}`;
+}
+
+// Returns the iteration count encoded in a stored hash, or null if the hash
+// isn't in our pbkdf2 format. Used by the rehash-on-login check.
+function iterationsOf(hash: string): number | null {
+  const parts = hash.split('$');
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return null;
+  const n = parseInt(parts[1], 10);
+  return Number.isInteger(n) && n >= 1000 ? n : null;
 }
 
 async function verifyPassword({ hash, password }: { hash: string; password: string }): Promise<boolean> {
@@ -404,8 +438,29 @@ async function createAuth(env: Bindings, baseUrl: string) {
       // flag never silently locks users out.
       requireEmailVerification: cfg.REQUIRE_EMAIL_VERIFICATION,
       password: {
-        hash: hashPassword,
-        verify: verifyPassword,
+        // New hashes use the deployment's configured iteration target.
+        hash: (password) => hashPassword(password, cfg.PBKDF2_ITERATIONS),
+        // Rehash-on-login: verify against the count baked into the stored hash,
+        // then — if it predates a raised target — transparently upgrade it now
+        // that we have the plaintext. Keyed on the old hash string (unique via
+        // its random salt). Best-effort: a failed write just retries next login.
+        verify: async ({ hash, password }) => {
+          const ok = await verifyPassword({ hash, password });
+          if (ok) {
+            const current = iterationsOf(hash);
+            if (current !== null && current < cfg.PBKDF2_ITERATIONS) {
+              try {
+                const fresh = await hashPassword(password, cfg.PBKDF2_ITERATIONS);
+                await env.DB.prepare('UPDATE account SET password = ? WHERE password = ?')
+                  .bind(fresh, hash)
+                  .run();
+              } catch {
+                /* non-fatal — hash stays at its old count until the next login */
+              }
+            }
+          }
+          return ok;
+        },
       },
       // BetterAuth's url here is `{baseURL}/reset-password/{token}?callbackURL={redirectTo}`.
       // The user clicks it, BetterAuth validates the token + redirects to
