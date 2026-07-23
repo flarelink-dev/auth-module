@@ -567,12 +567,24 @@ app.use('*', async (c, next) => {
   c.res.headers.set('Cache-Control', 'no-store');
 });
 
+// Flarelink's own dashboard drives the management endpoints (/__flarelink,
+// /__flarelink/test-email, /__flarelink/reload-config) browser-direct — it
+// never proxies through Flarelink's server (architecture invariant). So the
+// dashboard's origin must ALWAYS pass CORS, independently of the customer's
+// app trustedOrigins (which are their app URLs, not the dashboard's). Without
+// this, "Send test email" and config-reload pings fail CORS on every
+// deployment. Hardcoded because these are Flarelink's own fixed origins.
+const FLARELINK_DASHBOARD_ORIGINS = [
+  'https://dash.flarelink.dev',
+  'http://localhost:5173',
+];
+
 // Load config first so CORS knows trusted origins for this request. The
 // loadConfig call is cached, so this is ~free on warm isolates.
 app.use('*', async (c, next) => {
   const cfg = await loadConfig(c.env.DB);
   return cors({
-    origin: cfg.TRUSTED_ORIGINS,
+    origin: [...cfg.TRUSTED_ORIGINS, ...FLARELINK_DASHBOARD_ORIGINS],
     credentials: true,
     allowMethods: ['GET', 'POST', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'Cookie'],

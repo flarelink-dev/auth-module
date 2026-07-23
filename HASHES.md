@@ -20,6 +20,7 @@ sha256sum dist/worker.mjs            # Linux
 
 | Version | git tag | SHA-256 of `dist/worker.mjs` |
 |---------|---------|------------------------------|
+| 0.3.1   | `v0.3.1` | `a95e056a7c1c6c036a1e7b97029602b886b80ade97465dcbb6398d55d28f198f` |
 | 0.3.0   | `v0.3.0` | `06c3ded7f856061c3c70ba6ea7a7bd87d3a8f3593075cee079df0a7f089ed6c9` |
 
 > Reproducibility depends on the pinned toolchain: exact dependency versions in
