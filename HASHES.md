@@ -20,6 +20,7 @@ sha256sum dist/worker.mjs            # Linux
 
 | Version | git tag | SHA-256 of `dist/worker.mjs` |
 |---------|---------|------------------------------|
+| 0.3.2   | `v0.3.2` | `e2c1c30319a21c30511c9e293b2a78da628a93e5ebd4ca4793d9c9ac1d88db3e` |
 | 0.3.1   | `v0.3.1` | `a95e056a7c1c6c036a1e7b97029602b886b80ade97465dcbb6398d55d28f198f` |
 | 0.3.0   | `v0.3.0` | `06c3ded7f856061c3c70ba6ea7a7bd87d3a8f3593075cee079df0a7f089ed6c9` |
 

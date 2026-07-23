@@ -10,4 +10,4 @@
 // Bump here when shipping a new auth-module release. Both sides pick it up
 // next build.
 
-export const FLARELINK_AUTH_VERSION = '0.3.1';
+export const FLARELINK_AUTH_VERSION = '0.3.2';

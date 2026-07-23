@@ -1,12 +1,13 @@
 {
   "name": "@flarelink/auth-worker",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "The Flarelink auth Worker — source for the bundle Flarelink uploads to your Cloudflare account. Build it to verify the deployed bytes (see README).",
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node --test"
   },
   "//": "Runtime deps are pinned to EXACT versions (no ^) so a clean `npm ci && npm run build` reproduces the published bundle byte-for-byte. They must match the versions the dashboard builds with; the verify CLI / published hash catch any drift.",
   "dependencies": {

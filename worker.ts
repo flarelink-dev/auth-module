@@ -71,6 +71,7 @@ import {
   type TemplateType,
 } from './lib/email-templates.ts';
 import { rewriteEmailLinkCallback } from './lib/callback-rewrite.ts';
+import { sharedCookieDomain } from './lib/cookie-domain.ts';
 import {
   presignUrl,
   signedFetch,
@@ -419,6 +420,24 @@ async function createAuth(env: Bindings, baseUrl: string) {
   const db = drizzle(env.DB, { schema });
   const appName = appNameFromOrigins(cfg.TRUSTED_ORIGINS);
 
+  // When the auth Worker runs on a custom domain that shares a registrable
+  // domain with the app (e.g. auth.gridsnap.app + editor.gridsnap.app), scope
+  // cookies to that shared domain so the session + OAuth-state cookies are
+  // sent across both subdomains. Without this they're host-only and the OAuth
+  // round-trip breaks (state cookie set on the app host isn't sent to the
+  // auth host the redirect_uri is pinned to) and the app's own server routes
+  // can't see the session. Null on the workers.dev fallback / cross-site
+  // topology → BetterAuth keeps host-only + Partitioned cookies (correct
+  // there). See lib/cookie-domain.ts.
+  const authHost = (() => {
+    try {
+      return new URL(baseUrl).hostname;
+    } catch {
+      return '';
+    }
+  })();
+  const cookieDomain = sharedCookieDomain(authHost, cfg.TRUSTED_ORIGINS);
+
   // Convenience: build the rendered template for a given type + URL.
   // Overlays the customer's per-field overrides on top of the bundled
   // default, then substitutes {{url}} and {{appName}}. Used by all three
@@ -543,6 +562,16 @@ async function createAuth(env: Bindings, baseUrl: string) {
       ipAddress: {
         ipAddressHeaders: ['cf-connecting-ip'],
       },
+      // Shared-registrable-domain topology (custom auth domain): add
+      // `Domain=<registrable>` so cookies span the app + auth subdomains.
+      // Partitioned stays on (below) — every relevant state shares the same
+      // top-level site (the registrable domain), so the partition key is
+      // consistent and older browsers that ignore Partitioned just see a
+      // normal cross-subdomain cookie. Matches BetterAuth's documented
+      // cross-subdomain recipe.
+      ...(cookieDomain
+        ? { crossSubDomainCookies: { enabled: true, domain: cookieDomain } }
+        : {}),
       defaultCookieAttributes: {
         sameSite: 'none',
         secure: true,
