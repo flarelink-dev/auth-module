@@ -438,6 +438,10 @@ async function createAuth(env: Bindings, baseUrl: string) {
   })();
   const cookieDomain = sharedCookieDomain(authHost, cfg.TRUSTED_ORIGINS);
 
+  // Computed once so accountLinking.trustedProviders below stays in sync with
+  // exactly the providers configured on this deployment.
+  const socialProviders = buildSocialProviders(cfg);
+
   // Convenience: build the rendered template for a given type + URL.
   // Overlays the customer's per-field overrides on top of the bundled
   // default, then substitutes {{url}} and {{appName}}. Used by all three
@@ -522,7 +526,20 @@ async function createAuth(env: Bindings, baseUrl: string) {
         await sendFlarelinkEmail(cfg, env, user.email, renderFor('verify', fixed));
       },
     },
-    socialProviders: buildSocialProviders(cfg),
+    socialProviders,
+    account: {
+      accountLinking: {
+        enabled: true,
+        // Auto-link a social sign-in to an existing account with the same
+        // email (including one created via email/password) → one user row with
+        // multiple `account` rows, not a duplicate or an `account_not_linked`
+        // error. Only safe because Google + GitHub return provider-verified
+        // emails, so a matching email proves ownership. We trust exactly the
+        // providers configured on this deployment (both are email-verifying);
+        // an unverifying provider must never be added here.
+        trustedProviders: Object.keys(socialProviders),
+      },
+    },
     plugins: cfg.MAGIC_LINK_ENABLED
       ? [
           magicLink({
