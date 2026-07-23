@@ -1,6 +1,6 @@
 {
   "name": "@flarelink/auth-worker",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "The Flarelink auth Worker — source for the bundle Flarelink uploads to your Cloudflare account. Build it to verify the deployed bytes (see README).",
   "license": "SEE LICENSE IN LICENSE.md",

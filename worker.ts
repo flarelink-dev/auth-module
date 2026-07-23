@@ -777,6 +777,58 @@ app.post('/__flarelink/test-email', async (c) => {
   }
 });
 
+// Admin: resend a verification link to a specific user. Driven by the
+// dashboard's Authentication → Users panel ("Send verification link" on
+// pending accounts) so an owner can push a user over the email-verification
+// line — e.g. so a same-email Google sign-in will link (BetterAuth refuses to
+// link a trusted provider onto an *unverified* local account).
+//
+// Soft-gated on FLARELINK_PROJECT_ID like /test-email — not a real secret
+// (it's in /__flarelink), but enough to deflect drive-by spam, plus a short
+// isolate rate-limit. Blast radius is inherently small: BetterAuth's
+// send-verification-email only actually mails an *existing, unverified* user
+// (anti-enumeration no-ops for verified/unknown emails), so this can't be used
+// to mail arbitrary addresses. We call it via `auth.api` (not an HTTP hop), so
+// BetterAuth's trusted-origin check on /api/auth/* doesn't apply — the
+// dashboard origin never needs to be a trusted app origin.
+const SEND_VERIFICATION_MIN_INTERVAL_MS = 3_000;
+let lastSendVerificationAt = 0;
+app.post('/__flarelink/admin/send-verification', async (c) => {
+  const cfg = await loadConfig(c.env.DB);
+  const body = await c.req.json<{ email?: string; projectId?: string; callbackURL?: string }>().catch(
+    (): { email?: string; projectId?: string; callbackURL?: string } => ({})
+  );
+  if (!body.projectId || body.projectId !== cfg.FLARELINK_PROJECT_ID) {
+    return c.json({ error: 'projectId mismatch' }, 403);
+  }
+  if (!body.email) return c.json({ error: 'email is required' }, 400);
+
+  if (!cfg.EMAIL_PROVIDER || !cfg.EMAIL_FROM) {
+    return c.json({ error: 'email is not configured for this deployment' }, 412);
+  }
+
+  const now = Date.now();
+  if (now - lastSendVerificationAt < SEND_VERIFICATION_MIN_INTERVAL_MS) {
+    return c.json({ error: 'rate limited (1 send every 3s) — try again in a moment' }, 429);
+  }
+  lastSendVerificationAt = now;
+
+  try {
+    const baseUrl = new URL(c.req.url).origin;
+    const auth = await createAuth(c.env, baseUrl);
+    // Land the user on the app after verifying (autoSignInAfterVerification
+    // then signs them in). Default to the first trusted origin; the hook's
+    // callback-rewrite would fix a bare "/" anyway.
+    const callbackURL = cfg.TRUSTED_ORIGINS[0];
+    await auth.api.sendVerificationEmail({
+      body: callbackURL ? { email: body.email, callbackURL } : { email: body.email },
+    });
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 // --- v0.2 storage surface (gated by per-project service key) ----------------
 //
 // The customer's app server calls these via `@flarelink/client`'s
